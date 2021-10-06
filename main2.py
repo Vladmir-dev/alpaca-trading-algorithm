@@ -15,14 +15,12 @@ class TradeAlgo:
         self.close_prices = []
         self.highestPrice = 0
         self.breakoutlvl = 0
-        qty = 10.0
-        symbol = self.symbol
-        side = 'buy' 
-        types = 'market'
-        trail_price = None 
-        time_in_force = 'day'
-        self.market_open()
-        # self.submitOrder(symbol, qty, side, types, trail_price, time_in_force)
+        self.qty = 10.0
+        self.side = 'buy' 
+        self.type = 'market'
+        self.trail_price = None 
+        self.time_in_force = 'gtc'
+        
 
 
     def trade(self):
@@ -65,9 +63,11 @@ class TradeAlgo:
 
             self.position = int(self.api.get_position(self.symbol).qty)
 
+            print("position",self.position)
+
             #buy incase of a breakout
             if not self.position and close_prices[0] >= max(self.high[:-1]):
-                self.submitOrder(symbol, qty, side, types, trail_price, time_in_force)
+                self.submitOrder(self.symbol, self.qty, self.side, self.type, self.trail_price, self.time_in_force)
                 self.breakoutlvl = max(self.high[:-1])
                 self.highestPrice = self.breakoutlvl 
 
@@ -75,20 +75,27 @@ class TradeAlgo:
             if self.position:
             #if no order exits, send a stoploss
                 if not self.api.list_orders(status='open'):
-                    self.stopMarketTicket = self.submitOrder(symbol=self.symbol,
-                    qty=self.position.qty,side='sell', types='trailing_stop', trail_price=(self.initialStopRisk * breakoutlvl), time_in_force ='day')
+                    self.qty=self.position
+                    self.side ='sell'
+                    self.types='trailing_stop'
+                    self.trail_price=(self.initialStopRisk * self.breakoutlvl)
+                    
+                    self.stopMarketTicket = self.submitOrder(self.symbol, self.qty, self.side, self.types, self.trail_price, self.time_in_force)
 
-            #check if the asset's price is higher than highestPrice and trailing stop price not below initial stop price
+            #check if the asset's price is higher than highestPrice and trailing stop price not
+            #  below initial stop price
             if self.close_prices[0] > self.highestPrice and (self.initialStopRisk * self.breakoutlvl) < (self.close_prices[0] * self.trailingStopRisk):
 
             #save the new high to highest price
                 self.highestPrice = self.close_prices[0]
 
             #update the stop price/ trail_price
-                trail_price = (self.close_prices[0] * self.trailingStopRisk)
-                self.stopMarketTicket = self.submitOrder(symbol=self.symbol, qty=self.position.qty,side='sell', types='market', trail_price=trail_price, time_in_force ='day')
-                print("new stop price: ",trail_price)
+                self.trail_price = (self.close_prices[0] * self.trailingStopRisk)
+                self.stopMarketTicket = self.submitOrder(self.symbol, self.qty, self.side, self.types, self.trail_price, self.time_in_force)
+                print("updated stop price: ",trail_price)
 
+        else:
+            print("market closed")
 
 
 
@@ -98,10 +105,11 @@ class TradeAlgo:
 
         print(f"submitting {side} order for {qty} of {symbol}")
 
-        if trail_price:
-            order = self.api.submit_order(symbol, qty, side, types, trail_price,time_in_force)
+        if trail_price is not None:
+            order = self.api.submit_order(symbol, qty, side, types, trail_price, time_in_force)
+
         else:
-            order = self.api.submit_order(symbol, qty, side, types,time_in_force)
+            order = self.api.submit_order(symbol, qty, side, types, time_in_force)
 
         return order
 
