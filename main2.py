@@ -1,6 +1,7 @@
 import alpaca_trade_api as tradeapi
 import numpy as np
 import time
+from time import sleep
 from config import *
 
 class TradeAlgo:
@@ -15,10 +16,10 @@ class TradeAlgo:
         self.close_prices = []
         self.highestPrice = 0
         self.breakoutlvl = 0
-        self.qty = 10.0
+        self.qty = 10
         self.side = 'buy' 
         self.type = 'market'
-        self.trail_price = None 
+        self.trail_price= 0
         self.time_in_force = 'gtc'
         
 
@@ -34,6 +35,7 @@ class TradeAlgo:
             price_bars = barset[self.symbol]
             data = price_bars._raw
 
+            # self.close_prices = [closing_price['c'] for closing_price in data]
 
             for closing_price in data:
                 self.close_prices.append(closing_price['c'])
@@ -56,6 +58,7 @@ class TradeAlgo:
             barset = self.api.get_barset(self.symbol, 'day', limit=self.lookback)
             _data = price_bars._raw
 
+            # self.high = [price for price in _data if data['h]]
             for price in _data:
                 self.high.append(price['h'])
 
@@ -65,9 +68,16 @@ class TradeAlgo:
 
             print("position",self.position)
 
+             # First, get an up-to-date price for our symbol
+            symbol_bars = self.api.get_barset(self.symbol, 'minute', 1).df.iloc[0]
+            symbol_close_price = symbol_bars[self.symbol]['close']
+            print("latest symbol price",symbol_close_price)
+
             #buy incase of a breakout
-            if not self.position and close_prices[0] >= max(self.high[:-1]):
-                self.submitOrder(self.symbol, self.qty, self.side, self.type, self.trail_price, self.time_in_force)
+            if not self.position and symbol_close_price >= max(self.high[:-1]):
+                # self.submitOrder(self.symbol, self.qty, self.side, self.type, self.trail_price, self.time_in_force)
+                order = self.api.submit_order(symbol=self.symbol, qty=self.qty, side=self.side, type=self.type, time_in_force=self.time_in_force)
+                print(f"submitting {self.side} order for {self.qty} of {self.symbol}")
                 self.breakoutlvl = max(self.high[:-1])
                 self.highestPrice = self.breakoutlvl 
 
@@ -77,41 +87,64 @@ class TradeAlgo:
                 if not self.api.list_orders(status='open'):
                     self.qty=self.position
                     self.side ='sell'
-                    self.types='trailing_stop'
+                    self.type='trailing_stop'
                     self.trail_price=(self.initialStopRisk * self.breakoutlvl)
                     
-                    self.stopMarketTicket = self.submitOrder(self.symbol, self.qty, self.side, self.types, self.trail_price, self.time_in_force)
-
+                    self.stopMarketTicket = self.api.submit_order(symbol=self.symbol, 
+                    qty=self.qty, 
+                    side=self.side, 
+                    type=self.type, 
+                    trail_price=self.trail_price, 
+                    time_in_force=self.time_in_force
+                    )
+                    
+                    print(f"submitting {self.side} order for {self.qty} of {self.symbol}")
             #check if the asset's price is higher than highestPrice and trailing stop price not
             #  below initial stop price
-            if self.close_prices[0] > self.highestPrice and (self.initialStopRisk * self.breakoutlvl) < (self.close_prices[0] * self.trailingStopRisk):
+            if symbol_close_price > self.highestPrice and (self.initialStopRisk * self.breakoutlvl) < (symbol_close_price * self.trailingStopRisk):
 
             #save the new high to highest price
-                self.highestPrice = self.close_prices[0]
+                self.highestPrice = symbol_close_price
 
             #update the stop price/ trail_price
-                self.trail_price = (self.close_prices[0] * self.trailingStopRisk)
-                self.stopMarketTicket = self.submitOrder(self.symbol, self.qty, self.side, self.types, self.trail_price, self.time_in_force)
+                self.trail_price = (symbol_close_price * self.trailingStopRisk)
+                self.stopMarketTicket = self.api.submit_order(symbol=self.symbol, qty=self.qty, side=self.side, type=self.type, trail_price=self.trail_price, time_in_force=self.time_in_force)
+                print(f"submitting {self.side} order for {self.qty} of {self.symbol}")
                 print("updated stop price: ",trail_price)
 
         else:
-            print("market closed")
+            self.wait_for_market_open()
+            self.trade()
 
 
 
-    def submitOrder(self, symbol, qty, side, types, trail_price, time_in_force):
-        if qty == 0:
-           return
+    # def submitOrder(self, symbol, qty, side, type, trail_price, time_in_force):
+    #     if qty == 0:
+    #        return
 
-        print(f"submitting {side} order for {qty} of {symbol}")
+    #     print(f"submitting {side} order for {qty} of {symbol}")
 
-        if trail_price is not None:
-            order = self.api.submit_order(symbol, qty, side, types, trail_price, time_in_force)
+    #     if trail_price is not None:
+    #         jls_extract_var = symbol
+    #         order = self.api.submit_order(
+    #             jls_extract_var, 
+    #             qty, 
+    #             side, 
+    #             type, 
+    #             trail_price, 
+    #             time_in_force
+    #             )
 
-        else:
-            order = self.api.submit_order(symbol, qty, side, types, time_in_force)
+    #     else:
+    #         order = self.api.submit_order(
+    #             symbol, 
+    #             qty, 
+    #             side, 
+    #             type, 
+    #             time_in_force
+    #             )
 
-        return order
+    #     return order
 
 
 
@@ -119,6 +152,20 @@ class TradeAlgo:
         clock = self.api.get_clock()
         return clock.is_open
 
+
+
+    def wait_for_market_open(self):
+        clock = api.get_clock()
+
+        if not clock.is_open:
+            time_to_open = (clock.is_open - clock.timestamp).total_seconds()
+            sleep(time_to_open)
+            print("market is open......")
+
+
+    # def order_updates(self):
+    #     conn = tradeapi.stream2.StreamConn()
+    #     client_order_id = r'my_client_order_id'
 
 
 algo = TradeAlgo()
